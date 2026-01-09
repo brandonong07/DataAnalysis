@@ -1,82 +1,110 @@
 import pandas as pd
-import matplotlib as mpl
-import matplotlib.pyplot as plt
 import yfinance as yf
-import math as math
+import matplotlib.pyplot as plt
 
 class DataCleaner:
-    
-    # defining the constructor
-    # turning yfinance into pandas dataframe and defining ticker as string
-    def __init__(self, df: pd.DataFrame):
-        self.df = df.copy()
+
+    def __init__(self, ticker_symbol):
+        self.ticker = ticker_symbol
+        self.data = None
+        self.clean_data_frame = None
+
+    def fetch_data(self, start_date, end_date):
+        self.data = yf.download(self.ticker, start=start_date, end=end_date)
+        if self.data.empty:
+            raise ValueError("No data fetched for the given ticker and date range.")
+        print("Data fetched successfully.")
+        print(self.data.head())
         pass
+
+    def clean_and_prep(self):
+        if self.data is None:
+            print("No data to clean. Please fetch data.")
+            return
+
+        df = self.data.copy()
+
+        # Handle missing values
+        df.ffill(inplace=True)
+        df.dropna(inplace=True)
+
+        # Ensure Index is Datetime
+        if not isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index)
+        
+        # Remove Duplicates
+        df = df[~df.index.duplicated(keep='first')]
+
+        self.clean_data_frame = df
+        print("Data cleaned.")
+        pass
+
+    def aggregate_metrics(self):
+        if self.clean_data_frame is None:
+            print("No cleaned data to aggregate. Please clean data first.")
+            return
+
+        df = self.clean_data_frame
+
+        # Calculate daily returns
+        df['Daily Return'] = df['Close'].pct_change()
+
+        # Calculate moving averages (20-day and 50-day)
+        df['MA20'] = df['Close'].rolling(window=20).mean()
+        df['MA50'] = df['Close'].rolling(window=50).mean()
+        self.clean_data_frame = df
+        print("Metrics aggregated.")
+        pass
+
+    def visualize_trends(self):
+        if self.clean_data_frame is None:
+            print("No cleaned data to visualize. Please clean data first.")
+            return
+
+        df = self.clean_data_frame
+
+        plt.figure(figsize=(14, 7))
     
-    # preparing for SQL and turning adj_close to Adj Close
-    def standardize(self):
-        self.df = self.df.reset_index()
-        if isinstance(self.df.index, (pd.DatetimeIndex, pd.Index)):
-            self.df = self.df.reset_index()
+        # Plotting the raw price and the trends
+        plt.plot(df.index, df['Close'], label='Adjusted Close', alpha=0.5)
+        plt.plot(df.index, df['MA50'], label='50-Day MA (Trend)', color='orange', linestyle='--')
+        plt.plot(df.index, df['MA20'], label='20-Day MA (Trend)', color='red', linestyle='--')
 
-        # Normalizing column names
-        # adj_close -> Adj Close
-        self.df.columns = [c.lower().replace(" ", "_") for c in self.df.columns]
+        plt.title(f'{self.ticker} Price Trends & Moving Averages')
+        plt.xlabel('Date')
+        plt.ylabel('Price (USD)')
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+        pass
 
+    def summary(self):
+        if self.clean_data_frame is None:
+            print("No cleaned data to summarize. Please clean data first.")
+            return
 
+        df = self.clean_data_frame
 
-        # Renaming datetime column to date if it exists
-        if "datetime" in self.df.columns:
-            self.df = self.df.rename(columns={"datetime": "date"})
-        
-        expected_columns = {"date", "open", "high", "low", "close", "adj_close", "volume"}
-        missing = expected_columns - set(self.df.columns)
-       
-        # Raise error if any expected columns are missing
-        if missing:
-            raise ValueError(f"Missing expected columns: {missing}")
-        
-        self.df["date"] = pd.to_datetime(self.df["date"])
-        # Ensuring correct data types
+        total_return = (df['Close'].iloc[-1] / df['Close'][0] - 1) * 100
+        highest_price = df['Close'].max()
 
-        self.df["ticker"] = self.ticker
-        # ticker column
+        current_price = df['Close'].iloc[-1]
+        lowest_price = df['Close'].min()
 
-        # Handling duplicates by keeping the last occurrence
-        self.df = self.df.sort_values("date").drop_duplicates(subset=["date"], keep="last").reset_index(drop=True)
-        
-        return self
-    
-    def analysis_columns(self, windows=(20,50)):
-        if("adj_close" not in self.df.columns):
-            raise ValueError("Run standardize() method before analysis_columns()")
-        
-        # Price as adjusted close
-        self.df["price"] = self.df["adj_close"]
+        print(f"Summary for {self.ticker}:")
+        print(f"Total Return: {total_return:.2f}%")
+        print(f"Highest Price: ${highest_price:.2f}")
+        pass
 
-        # Returns
-        self.df["returns"] = self.df["adj_close"].pct_change()
-
-        # Log Returns
-        self.df["log_return"] = self.df["return"].apply(
-            lambda r: math.log1p(r) if pd.notna(r) and (1 + r) > 0 else pd.NA
-        )
-
-        for w in windows:
-            # Moving Averages
-            self.df[f"ma_{w}"] = self.df["adj_close"].rolling(window=w).mean()
-            # Volatility
-            self.df[f"volatility_{w}"] = self.df["returns"].rolling(window=w).std()
-
-        return self
-
-def main():
-    # Example usage
-    ticker = "AAPL"
-    data = yf.download(ticker, start="2020-01-01", end="2023-01-01")
-    cleaner = DataCleaner(data)
-    cleaner.standardize().analysis_columns()
-    print(cleaner.df.head())
-
-main()
-
-
+c = DataCleaner('AAPL')
+# 1. Data
+c.fetch_data('2020-01-01', '2023-01-01')
+# 2. Clean & Prep
+c.clean_and_prep()
+# 3. Aggregate Metrics
+c.aggregate_metrics()
+# 4. Visualize Trends
+c.visualize_trends()
+# 5. Summary
+c.summary()
